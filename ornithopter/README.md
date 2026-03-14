@@ -1,5 +1,7 @@
 # AutoOrnithopter
 
+> **Note**: This is a modified fork of [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (itself a Windows fork of [Karpathy's autoresearch](https://github.com/karpathy/autoresearch)). The `ornithopter/` subdirectory contains an autonomous ornithopter design research framework I'm building — applying the same agent-driven experiment loop to flapping-wing aerodynamic design instead of ML architecture search.
+
 Autonomous ornithopter (flapping-wing) design optimization, inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch). An LLM agent edits wing design parameters, runs an aerodynamic simulation, evaluates the result, keeps improvements, and repeats — potentially running thousands of experiments overnight on a consumer PC.
 
 The aerodynamic solver is [PteraSoftware](https://github.com/camUrban/PteraSoftware), which implements an Unsteady Ring Vortex Lattice Method (UVLM) specifically built for flapping-wing analysis.
