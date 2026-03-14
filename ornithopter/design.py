@@ -1,0 +1,77 @@
+"""
+Ornithopter Design Parameters
+==============================
+
+Edit any parameter below to change the wing design, then run:
+
+    uv run simulate.py > run.log 2>&1
+
+Parameter ranges (for reference, not hard limits):
+  SEMI_SPAN:        0.10 - 0.60 m
+  ROOT_CHORD:       0.03 - 0.12 m
+  TAPER_RATIO:      0.25 - 1.00
+  SWEEP_ANGLE:      0 - 25 deg
+  DIHEDRAL_ANGLE:   -5 - 12 deg
+  FLAP_FREQUENCY:   2 - 20 Hz
+  FLAP_AMPLITUDE:   15 - 70 deg (half-stroke)
+  PITCH_AMPLITUDE:  10 - 40 deg
+  PHASE_OFFSET:     70 - 110 deg
+  MEAN_AOA:         0 - 12 deg
+  FLIGHT_SPEED:     1 - 15 m/s
+  ROOT_AIRFOIL:     NACA 4-series (e.g. "naca0012", "naca2412", "naca4412")
+  TIP_AIRFOIL:      NACA 4-series
+"""
+
+import math
+
+# ---------------------------------------------------------------------------
+# Wing Geometry
+# ---------------------------------------------------------------------------
+
+SEMI_SPAN = 0.30             # Half-wingspan, meters
+ROOT_CHORD = 0.08            # Chord at wing root, meters
+TAPER_RATIO = 0.50           # Tip chord / root chord [0.25 - 1.0]
+SWEEP_ANGLE = 5.0            # Quarter-chord sweep, degrees
+DIHEDRAL_ANGLE = 0.0         # Upward angle from root, degrees
+ROOT_AIRFOIL = "naca2412"    # Root airfoil profile
+TIP_AIRFOIL = "naca2412"     # Tip airfoil profile
+
+# ---------------------------------------------------------------------------
+# Flapping Kinematics
+# ---------------------------------------------------------------------------
+
+FLAP_FREQUENCY = 5.0         # Flapping frequency, Hz
+FLAP_AMPLITUDE = 30.0        # Half-stroke amplitude, degrees
+PITCH_AMPLITUDE = 15.0       # Maximum pitch/twist angle, degrees
+PHASE_OFFSET = 90.0          # Phase lag between pitch and flap, degrees
+MEAN_AOA = 5.0               # Mean angle of attack, degrees
+
+# ---------------------------------------------------------------------------
+# Flight Conditions
+# ---------------------------------------------------------------------------
+
+FLIGHT_SPEED = 5.0           # Freestream velocity, m/s
+AIR_DENSITY = 1.225          # Air density, kg/m^3
+KINEMATIC_VISCOSITY = 15.06e-6  # Kinematic viscosity, m^2/s
+
+# ---------------------------------------------------------------------------
+# Simulation Resolution
+# ---------------------------------------------------------------------------
+
+NUM_SPANWISE_PANELS = 8      # Panels along span (higher = more accurate, slower)
+NUM_CHORDWISE_PANELS = 6     # Panels along chord (higher = more accurate, slower)
+NUM_CYCLES = 3               # Flapping cycles to simulate [2-5]
+
+# ---------------------------------------------------------------------------
+# Derived Quantities (computed from above, do not edit directly)
+# ---------------------------------------------------------------------------
+
+TIP_CHORD = ROOT_CHORD * TAPER_RATIO
+MEAN_CHORD = (ROOT_CHORD + TIP_CHORD) / 2
+WING_AREA = MEAN_CHORD * SEMI_SPAN * 2  # total planform area (both wings)
+ASPECT_RATIO = (2 * SEMI_SPAN) ** 2 / WING_AREA
+FLAP_PERIOD = 1.0 / FLAP_FREQUENCY
+REYNOLDS_NUMBER = FLIGHT_SPEED * MEAN_CHORD / KINEMATIC_VISCOSITY
+TIP_EXCURSION = 2 * SEMI_SPAN * math.sin(math.radians(FLAP_AMPLITUDE))
+STROUHAL_NUMBER = FLAP_FREQUENCY * TIP_EXCURSION / FLIGHT_SPEED
+REDUCED_FREQUENCY = math.pi * FLAP_FREQUENCY * MEAN_CHORD / FLIGHT_SPEED
