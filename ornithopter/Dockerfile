@@ -23,11 +23,11 @@ ENV PATH="/home/researcher/.local/bin:$PATH"
 WORKDIR /app
 
 # Install Python deps first (cached layer)
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 RUN uv sync
 
 # Copy source files
-COPY design.py simulate.py evaluate.py visualize.py program.md results.tsv CLAUDE.md ./
+COPY design.py simulate.py evaluate.py visualize.py program.md build_details.md results.tsv CLAUDE.md ./
 
 # Create results mount point
 RUN mkdir -p /app/results
