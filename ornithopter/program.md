@@ -24,11 +24,16 @@ Once confirmed, start the experimentation loop.
 Each experiment simulates one ornithopter design using the Unsteady Ring Vortex Lattice Method (UVLM). Typical simulation time: **10-60 seconds** (much faster than autoresearch's 5-minute ML training). You can run **60+ experiments per hour**.
 
 **What you CAN do:**
-- Modify `design.py` — this is the ONLY file you edit. Everything is fair game:
+- Modify `design.py` — this is the ONLY file you edit. You may change:
   - Wing geometry: semi-span, root chord, taper ratio, sweep, dihedral, airfoil
   - Flapping kinematics: frequency, amplitude, pitch angle, phase offset
   - Flight conditions: speed, angle of attack
-  - Simulation resolution: panel counts, number of cycles
+  - Panel counts: NUM_SPANWISE_PANELS (min 4), NUM_CHORDWISE_PANELS (min 3)
+
+**What you MUST NOT change in design.py:**
+- `AIR_DENSITY` — physical constant (1.225 kg/m³), not a design parameter
+- `KINEMATIC_VISCOSITY` — physical constant (15.06e-6 m²/s), not a design parameter
+- `NUM_CYCLES` — locked at 3 (fewer = unreliable cycle-averaging, more = wasted time)
 
 **What you CANNOT do:**
 - Modify `simulate.py`. It contains the fixed simulation pipeline.
@@ -113,6 +118,7 @@ LOOP FOREVER:
 7. Record the results in the TSV
 8. If fitness improved (higher), you "advance" the branch, keeping the git commit
 9. If fitness is equal or worse, you git reset back to where you started
+10. Sync results to mounted volume: `./sync-results.sh` (if running in Docker)
 
 **Timeout**: If a run exceeds 2 minutes, kill it and treat it as a failure.
 
@@ -155,6 +161,33 @@ The design space is rich. Here are ideas organized by category:
 - The pitch-flap phase offset controls whether the wing "feathers" to reduce drag on the upstroke
 - Higher aspect ratio = less induced drag but more structural challenge
 - Lower Reynolds number = thicker boundary layers, earlier separation
+
+## Physical Constraints
+
+The simulation must produce designs that are physically buildable as a 30–100 g MAV (50 g nominal). These bounds come from real hardware limits — motor/gearbox availability, linkage mechanism geometry, structural material properties, and scaling laws for flapping flight. See `build_details.md` for derivations.
+
+**Hard parameter bounds (override the wider ranges in design.py header):**
+
+| Parameter          | Min   | Max   | Physical reason                                        |
+|--------------------|-------|-------|-------------------------------------------------------|
+| `SEMI_SPAN`        | 0.10 m | 0.25 m | Total wingspan 200–500 mm; longer needs heavier spars |
+| `ROOT_CHORD`       | 0.04 m | 0.10 m | Narrower saves wing mass; wider is structurally easier |
+| `TAPER_RATIO`      | 0.30  | 1.00  | Below 0.3, tip is too fragile for film membrane       |
+| `SWEEP_ANGLE`      | 0°    | 15°   | Above 15° hard to build with straight CF spars        |
+| `DIHEDRAL_ANGLE`   | 0°    | 8°    | Negative is unstable; above 8° hard at root joint     |
+| `FLAP_FREQUENCY`   | 8 Hz  | 18 Hz | Scaling law f ∝ m^(−0.43) for 30–100 g class         |
+| `FLAP_AMPLITUDE`   | 20°   | 55°   | Above 55° exceeds four-bar linkage practical limit    |
+| `PITCH_AMPLITUDE`  | 10°   | 30°   | Passive pitch from film flex; above 30° causes flutter |
+| `PHASE_OFFSET`     | 75°   | 105°  | 90° optimal; membrane wings self-select near this     |
+| `MEAN_AOA`         | 2°    | 8°    | Below 2° insufficient lift; above 8° risks stall     |
+| `FLIGHT_SPEED`     | 2 m/s | 8 m/s | MAV regime; below 2 is near-hover, above 8 is large-bird |
+
+**Derived constraints to verify after each run:**
+- **Lift check**: `mean_lift_N` ≥ 0.49 N (supports 50 g against gravity)
+- **Wing loading**: target weight / WING_AREA should be 5–20 N/m²
+- **Strouhal number**: 0.2–0.5 (already penalized in evaluate.py outside this range)
+
+These constraints are meant to keep the agent in the buildable regime. The agent should still explore the full range within these bounds — the optimal design is unknown.
 
 ## NEVER STOP
 

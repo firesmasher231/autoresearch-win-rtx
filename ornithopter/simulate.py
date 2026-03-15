@@ -63,6 +63,10 @@ def get_design_params():
         "mean_aoa": MEAN_AOA,
         "flight_speed": FLIGHT_SPEED,
         "num_cycles": NUM_CYCLES,
+        "air_density": AIR_DENSITY,
+        "kinematic_viscosity": KINEMATIC_VISCOSITY,
+        "num_spanwise_panels": NUM_SPANWISE_PANELS,
+        "num_chordwise_panels": NUM_CHORDWISE_PANELS,
     }
 
 
@@ -303,6 +307,9 @@ def main():
     print()
     print("---")
     print(f"fitness:          {fitness:.6f}")
+    if "penalties" in metrics:
+        for name, value in metrics["penalties"].items():
+            print(f"penalty_{name}:    {value:.6f}")
     print(f"mean_CT:          {metrics['mean_CT']:.6f}")
     print(f"mean_CL:          {metrics['mean_CL']:.6f}")
     print(f"mean_CD:          {metrics['mean_CD']:.6f}")

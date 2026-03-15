@@ -1,0 +1,13 @@
+# Don't copy generated/temp files into the image
+__pycache__/
+.venv/
+*.pyc
+sim_output.json
+run.log
+*.gif
+*.mp4
+*.webp
+*.png
+*.pt
+docker-results/
+.claude/

@@ -1,0 +1,16 @@
+services:
+  ornithopter:
+    build: .
+    container_name: auto-ornithopter
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount Claude credentials (researcher user, not root)
+      - ~/.claude:/home/researcher/.claude
+      # Mount results directory to see experiment logs from host
+      - ./docker-results:/app/results
+
+    # ---- Safety options (uncomment as desired) ----
+    # cpus: "4"
+    # mem_limit: 4g
+    # network_mode: none

@@ -78,6 +78,8 @@ All tunable parameters live in `design.py`. The agent can modify any of them:
 
 ### Flapping kinematics
 
+Currently uses sinusoidal flap + sinusoidal pitch. See [Future work: advanced flapping kinematics](#future-work-advanced-flapping-kinematics) for plans to support asymmetric strokes, non-sinusoidal waveforms, and figure-8 patterns.
+
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
 | `FLAP_FREQUENCY` | 5.0 Hz | 2 - 20 | Flapping frequency |
@@ -288,6 +290,27 @@ The default design in `design.py` produces:
 | Strouhal number | 0.300 |
 | Reynolds number | 19,920 |
 | Simulation time | ~55 s |
+
+## Future work: advanced flapping kinematics
+
+The current simulation uses **sinusoidal flapping and pitching** defined by 5 parameters (frequency, flap amplitude, pitch amplitude, phase offset, mean AoA). This covers a wide design space but constrains the wing to simple harmonic motion:
+
+```
+flap(t)  = FLAP_AMPLITUDE * sin(2π * f * t)
+pitch(t) = PITCH_AMPLITUDE * sin(2π * f * t + PHASE_OFFSET)
+```
+
+PteraSoftware supports more complex motions via custom spacing functions — these would require changes to `simulate.py` to expose as parameters in `design.py`. Potential extensions:
+
+- **Asymmetric upstroke/downstroke**: Faster downstroke (power stroke) with slower upstroke (recovery). Birds and insects use this extensively. PteraSoftware supports this via custom `spacing` callables that are non-symmetric over the period.
+- **Non-sinusoidal waveforms**: Trapezoidal, triangular, or clipped-sine profiles that hold the wing at peak angle longer. Could improve thrust by spending more time at effective angles.
+- **Variable pitch through the stroke**: Instead of uniform sinusoidal pitch, the pitch angle could follow a more complex profile — e.g., rapid pitch reversal at stroke ends (like insect wings).
+- **Figure-8 stroke patterns**: Some hovering insects trace a figure-8 with their wingtips. This can be approximated by adding a harmonic to the vertical heave component (`ampLer_Gs_Cgs` on the WingMovement).
+- **Differential spanwise twist**: Apply pitch oscillation only to the tip cross-section (non-root WCS), creating washout that varies through the stroke — more like a real flexible wing.
+- **Stroke plane inclination**: Currently the stroke plane is fixed. Adding an oscillation to the wing's z-angle could tilt the stroke plane dynamically.
+- **Multi-frequency components**: Add 2nd or 3rd harmonics to the flap/pitch waveforms for finer control of the force profile through each cycle.
+
+These would significantly expand the design space the agent can explore. The trade-off is more parameters = slower convergence, so it's best to first optimize the simple sinusoidal case and then add complexity.
 
 ## Key resources
 

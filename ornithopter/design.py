@@ -6,18 +6,18 @@ Edit any parameter below to change the wing design, then run:
 
     uv run simulate.py > run.log 2>&1
 
-Parameter ranges (for reference, not hard limits):
-  SEMI_SPAN:        0.10 - 0.60 m
-  ROOT_CHORD:       0.03 - 0.12 m
-  TAPER_RATIO:      0.25 - 1.00
-  SWEEP_ANGLE:      0 - 25 deg
-  DIHEDRAL_ANGLE:   -5 - 12 deg
-  FLAP_FREQUENCY:   2 - 20 Hz
-  FLAP_AMPLITUDE:   15 - 70 deg (half-stroke)
-  PITCH_AMPLITUDE:  10 - 40 deg
-  PHASE_OFFSET:     70 - 110 deg
-  MEAN_AOA:         0 - 12 deg
-  FLIGHT_SPEED:     1 - 15 m/s
+Parameter ranges (physically buildable bounds — see build_details.md):
+  SEMI_SPAN:        0.10 - 0.25 m   (total wingspan 200-500 mm)
+  ROOT_CHORD:       0.04 - 0.10 m
+  TAPER_RATIO:      0.30 - 1.00     (below 0.3 too fragile for film wing)
+  SWEEP_ANGLE:      0 - 15 deg      (above 15 hard with straight CF spars)
+  DIHEDRAL_ANGLE:   0 - 8 deg
+  FLAP_FREQUENCY:   8 - 18 Hz       (scaling law for 30-100g MAV)
+  FLAP_AMPLITUDE:   20 - 55 deg     (four-bar linkage limit)
+  PITCH_AMPLITUDE:  10 - 30 deg     (passive pitch from film flex)
+  PHASE_OFFSET:     75 - 105 deg
+  MEAN_AOA:         2 - 8 deg
+  FLIGHT_SPEED:     2 - 8 m/s       (MAV regime)
   ROOT_AIRFOIL:     NACA 4-series (e.g. "naca0012", "naca2412", "naca4412")
   TIP_AIRFOIL:      NACA 4-series
 """
@@ -51,16 +51,16 @@ MEAN_AOA = 5.0               # Mean angle of attack, degrees
 # ---------------------------------------------------------------------------
 
 FLIGHT_SPEED = 5.0           # Freestream velocity, m/s
-AIR_DENSITY = 1.225          # Air density, kg/m^3
-KINEMATIC_VISCOSITY = 15.06e-6  # Kinematic viscosity, m^2/s
+AIR_DENSITY = 1.225          # Air density, kg/m^3  *** LOCKED — physical constant ***
+KINEMATIC_VISCOSITY = 15.06e-6  # Kinematic viscosity, m^2/s  *** LOCKED — physical constant ***
 
 # ---------------------------------------------------------------------------
 # Simulation Resolution
 # ---------------------------------------------------------------------------
 
-NUM_SPANWISE_PANELS = 8      # Panels along span (higher = more accurate, slower)
-NUM_CHORDWISE_PANELS = 6     # Panels along chord (higher = more accurate, slower)
-NUM_CYCLES = 3               # Flapping cycles to simulate [2-5]
+NUM_SPANWISE_PANELS = 8      # Panels along span (min 4; higher = more accurate, slower)
+NUM_CHORDWISE_PANELS = 6     # Panels along chord (min 3; higher = more accurate, slower)
+NUM_CYCLES = 3               # *** LOCKED at 3 — do not change ***
 
 # ---------------------------------------------------------------------------
 # Derived Quantities (computed from above, do not edit directly)
