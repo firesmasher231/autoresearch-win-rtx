@@ -7,74 +7,97 @@ Computes fitness metrics from simulation results.
 DO NOT MODIFY THIS FILE. This is the ground truth evaluation,
 analogous to prepare.py's evaluate_bpb in autoresearch.
 
-Fitness metric: propulsive efficiency
---------------------------------------
-fitness = corrected_thrust / P_flap_estimate
+Fitness metric: multiplicative composite
+------------------------------------------
+fitness = thrust_score × strouhal_score × lift_score
 
-Where:
-  corrected_thrust = UVLM thrust - estimated parasitic drag (N)
-  P_flap_estimate  = (rho/6) * v_tip^3 * S_wing (watts)
+Each factor is in [0, 1]. All three must be good for high fitness.
+Maximum possible fitness = 1.0. Typical good design: 0.1-0.4.
 
-This measures how much useful thrust the design produces per watt of
-estimated flapping power. Higher = more efficient = better design.
+Components:
+  thrust_score:   Saturating function of corrected thrust (N).
+                  Diminishing returns prevent "more force = always better".
+  strouhal_score: Gaussian peaked at St=0.30 (biological optimum).
+                  Forces the agent to balance f, amplitude, span, and speed
+                  rather than pushing any single parameter to its limit.
+  lift_score:     Ramp from 0 to 1 at target lift (0.49N for 50g).
+                  The design must fly before efficiency matters.
 
-Why not raw CT (thrust coefficient)?
-  CT is trivially maximizable — the agent just cranks frequency, amplitude,
-  and AoA to produce huge coefficients that are physically meaningless.
-  CT = 2.81 was reached in 34 experiments by pushing every parameter to its
-  limit. The efficiency metric instead rewards designs that produce thrust
-  CHEAPLY (low flapping power), which is what actually matters for a
-  battery-powered MAV.
+Why this structure?
+  Previous metrics were all trivially maximizable:
+  - Raw CT: agent pushed AoA to -80° → CT=331
+  - CT with cap: agent hit cap in 34 experiments and stopped
+  - Thrust/power ratio: V² in numerator, not in denominator; S cancels;
+    P_flap floor reachable within bounds → fitness=30+ trivially
 
-Physical bounds enforcement
-----------------------------
-All design parameters must fall within the buildable ranges for a 30-100g
-MAV ornithopter. These are enforced as hard blocks in validate_design.
-See build_details.md for the physical justification of each bound.
+  The multiplicative composite has NO ratio to game, NO denominator to
+  minimize, and the Strouhal constraint creates a genuine multi-variable
+  optimization problem with no trivial solution.
 
-Lift floor
------------
-The design must produce at least 0.49N of mean lift (supporting 50g against
-gravity). Designs below this threshold receive a steep penalty that dominates
-the efficiency score, forcing the agent to meet the lift requirement before
-optimizing efficiency.
+UVLM correction
+-----------------
+UVLM is an inviscid potential-flow solver that overestimates forces by
+~2-3x at the low Reynolds numbers (10k-50k) of MAV ornithopters. A
+correction factor of 0.5 is applied to all UVLM forces before fitness
+computation. This doesn't change which design is best (it's a constant
+multiplier on forces), but it prevents the agent from seeing unrealistic
+force magnitudes that might lead it to declare success prematurely.
 """
 
 import math
 
 
-# Air density at sea level, 20°C (locked physical constant)
-RHO = 1.225
+# --- Physical constants ---
+RHO = 1.225  # air density at sea level (kg/m³), locked
 
-# Minimum lift to support target weight: 50g * 9.81 m/s²
-TARGET_LIFT_N = 0.49
+# --- UVLM correction ---
+# UVLM overestimates forces at low Re (no viscous losses, no stall).
+# At Re=10k-50k typical of MAV ornithopters, real forces are ~40-60%
+# of UVLM predictions. Apply 0.5 correction to all forces.
+UVLM_CORRECTION = 0.50
 
-# Estimated parasitic drag coefficient (profile drag + body drag).
-# UVLM is inviscid and does not compute viscous drag. This correction
-# prevents the agent from being rewarded for "free thrust" that would
-# be eaten by skin friction in reality.
+# --- Parasitic drag ---
+# UVLM doesn't model skin friction. Subtract estimated profile + body drag.
 CD_PARASITE = 0.03
 
-# Physical bounds for a buildable 30-100g MAV ornithopter.
-# Enforced as hard blocks — simulation won't run outside these ranges.
+# --- Lift target ---
+# 50g × 9.81 m/s² = 0.49N. Design must support its own weight.
+TARGET_LIFT_N = 0.49
+
+# --- Thrust scoring ---
+# Saturating function: score = thrust / (thrust + halfpoint)
+# At halfpoint thrust, score = 0.5. Diminishing returns above.
+# 0.10N corrected thrust gives score=0.5. At 0.30N score=0.75, at 1.0N score=0.91.
+# This spreads the gradient across the realistic thrust range for a 50g MAV.
+THRUST_HALFPOINT_N = 0.10
+
+# --- Strouhal scoring ---
+# Biological flyers converge on St=0.2-0.4 because this range maximizes
+# propulsive efficiency. The Gaussian peaks at 0.30 with σ=0.12, giving
+# score > 0.5 within [0.18, 0.42] — matching the biological optimum.
+# This is the KEY anti-exploit mechanism: it forces the agent to BALANCE
+# frequency, amplitude, span, and speed rather than maximizing any one.
+ST_OPTIMAL = 0.30
+ST_SIGMA = 0.12
+
+# --- Physical bounds ---
 PHYSICAL_BOUNDS = {
-    "semi_span":       (0.10, 0.25),   # total wingspan 200-500mm
-    "root_chord":      (0.04, 0.10),   # wing chord at root (m)
-    "taper_ratio":     (0.30, 1.00),   # tip chord / root chord
-    "sweep_angle":     (0.0,  15.0),   # quarter-chord sweep (deg)
-    "dihedral_angle":  (0.0,   8.0),   # wing dihedral (deg)
-    "mid_span_fraction": (0.20, 0.80), # mid-section spanwise position
-    "mid_chord_ratio": (0.50, 2.00),   # mid chord / root chord
-    "mid_sweep_offset": (-0.02, 0.02), # fore/aft shift at mid-section (m)
-    "flap_frequency":  (8.0,  18.0),   # flapping frequency (Hz)
-    "flap_amplitude":  (20.0, 55.0),   # half-stroke amplitude (deg)
-    "pitch_amplitude": (10.0, 30.0),   # max pitch angle (deg)
-    "phase_offset":    (75.0, 105.0),  # pitch-flap phase lag (deg)
-    "mean_aoa":        (2.0,   8.0),   # body angle of attack (deg)
-    "flight_speed":    (2.0,   8.0),   # forward airspeed (m/s)
+    "semi_span":       (0.10, 0.25),
+    "root_chord":      (0.04, 0.10),
+    "taper_ratio":     (0.30, 1.00),
+    "sweep_angle":     (0.0,  15.0),
+    "dihedral_angle":  (0.0,   8.0),
+    "mid_span_fraction": (0.20, 0.80),
+    "mid_chord_ratio": (0.50, 2.00),
+    "mid_sweep_offset": (-0.02, 0.02),
+    "flap_frequency":  (8.0,  18.0),
+    "flap_amplitude":  (20.0, 55.0),
+    "pitch_amplitude": (10.0, 30.0),
+    "phase_offset":    (75.0, 105.0),
+    "mean_aoa":        (2.0,   8.0),
+    "flight_speed":    (2.0,   8.0),
 }
 
-# Human-readable names for error messages
 _PARAM_NAMES = {
     "semi_span": "SEMI_SPAN",
     "root_chord": "ROOT_CHORD",
@@ -127,8 +150,6 @@ def validate_design(params):
         errors.append("NUM_CYCLES must be >= 1")
 
     # --- Wing self-intersection (safety net) ---
-    # With physical bounds (dihedral <= 8, amplitude <= 55), max total is
-    # 63° — well below 90°. But keep this check as defense in depth.
     dihedral = params.get("dihedral_angle", 0)
     flap_amp = params.get("flap_amplitude", 0)
     if abs(dihedral) + flap_amp >= 90:
@@ -138,11 +159,19 @@ def validate_design(params):
             f"Wings would clip through each other."
         )
 
-    # --- Extreme aspect ratio ---
+    # --- Extreme aspect ratio (using 3-section wing area) ---
     if params["semi_span"] > 0 and params["root_chord"] > 0:
-        mean_chord = params["root_chord"] * (1 + params["taper_ratio"]) / 2
-        wing_area = mean_chord * params["semi_span"] * 2
-        ar = (2 * params["semi_span"]) ** 2 / wing_area
+        mid_frac = params.get("mid_span_fraction", 0.5)
+        mid_ratio = params.get("mid_chord_ratio", 0.75)
+        rc = params["root_chord"]
+        tr = params["taper_ratio"]
+        b = params["semi_span"]
+        mid_chord = rc * mid_ratio
+        tip_chord = rc * tr
+        mid_y = mid_frac * b
+        wing_area = ((rc + mid_chord) / 2 * mid_y +
+                     (mid_chord + tip_chord) / 2 * (b - mid_y)) * 2
+        ar = (2 * b) ** 2 / wing_area if wing_area > 0 else 999
         if ar > 15:
             errors.append(
                 f"Aspect ratio {ar:.1f} exceeds 15. Structurally infeasible "
@@ -191,25 +220,16 @@ def validate_design(params):
 
 
 def compute_fitness(results):
-    """Compute fitness as propulsive efficiency: thrust per watt of flapping power.
+    """Compute fitness as a multiplicative composite of three scores.
 
-    fitness = corrected_thrust / P_flap_estimate
+    fitness = thrust_score × strouhal_score × lift_score
 
-    Where:
-      corrected_thrust = UVLM mean thrust - parasitic drag estimate (N)
-      P_flap_estimate  = (rho/6) * v_tip^3 * wing_area (watts)
-        v_tip = 2*pi*f * semi_span * sin(flap_amplitude)
+    Each score is in [0, 1]. The product is maximized only when ALL three
+    are simultaneously good. This prevents gaming any single axis.
 
-    The parasitic drag correction accounts for viscous drag that UVLM
-    (inviscid solver) does not model. Without it, the agent gets "free"
-    thrust at high speeds.
-
-    P_flap_estimate captures the cubic scaling of flapping power with tip
-    speed — the dominant cost of flapping flight. Higher frequency, larger
-    amplitude, or longer span all increase tip speed and thus power cubically.
-
-    Lift floor: mean_lift must reach 0.49N (50g weight support). Designs
-    below this get a steep penalty that dominates the efficiency score.
+    thrust_score:   saturating(corrected_thrust)  — diminishing returns
+    strouhal_score: gaussian(St, peak=0.30)       — must hit bio-optimal range
+    lift_score:     ramp(corrected_lift, 0→0.49N) — must support weight
 
     Returns:
         (fitness, metrics_dict)
@@ -217,57 +237,58 @@ def compute_fitness(results):
     ca = results["cycle_averaged"]
     di = results["design_info"]
 
+    mean_thrust = ca["mean_thrust"]
+    mean_lift = ca["mean_lift"]
     mean_CT = ca["mean_CT"]
     mean_CL = ca["mean_CL"]
     mean_CD = ca["mean_CD"]
-    mean_thrust = ca["mean_thrust"]
-    mean_lift = ca["mean_lift"]
     mean_drag = ca["mean_drag"]
 
     V = di["flight_speed"]
     S = di["wing_area"]
-    f = di["flap_frequency"]
-    b = di["semi_span"]
-    amp_rad = math.radians(di["flap_amplitude"])
 
-    penalties = {}
+    # --- Apply UVLM correction ---
+    # UVLM overpredicts forces at low Re. Scale all forces by correction factor.
+    corrected_thrust = mean_thrust * UVLM_CORRECTION
+    corrected_lift = mean_lift * UVLM_CORRECTION
 
-    # --- Parasitic drag correction ---
-    # UVLM is inviscid: it computes pressure forces but not skin friction.
-    # A real wing has profile drag + body drag ≈ Cd_parasite * q * S.
-    # Subtract this from UVLM thrust to get realistic net thrust.
+    # --- Subtract parasitic drag from thrust ---
+    # UVLM doesn't model skin friction. Real net thrust is lower.
     q = 0.5 * RHO * V ** 2
     parasitic_drag = q * S * CD_PARASITE
-    corrected_thrust = mean_thrust - parasitic_drag
+    corrected_thrust -= parasitic_drag
 
-    # --- Estimated flapping power (watts) ---
-    # Tip speed of the wing during flapping:
-    #   v_tip = 2*pi*f * semi_span * sin(flap_amplitude)
-    # Power scales as v_tip^3 (aerodynamic drag on oscillating wing),
-    # with span-averaging factor of 1/3 (velocity varies from 0 at root
-    # to v_tip at tip, and power ~ v^3, so integral of (r/b)^3 = 1/4,
-    # combined with 1/2 from dynamic pressure gives 1/6 overall).
-    v_tip = 2 * math.pi * f * b * math.sin(amp_rad)
-    P_flap = (RHO / 6) * v_tip ** 3 * S
-    P_flap = max(P_flap, 0.01)  # floor to prevent division by zero
+    # --- THRUST SCORE (saturating, diminishing returns) ---
+    # score = thrust / (thrust + halfpoint)
+    # At halfpoint: score = 0.5. Asymptotes to 1.0.
+    # Negative thrust → score = 0.
+    if corrected_thrust > 0:
+        thrust_score = corrected_thrust / (corrected_thrust + THRUST_HALFPOINT_N)
+    else:
+        thrust_score = 0.0
 
-    # --- Base fitness: propulsive efficiency (N/W) ---
-    fitness = corrected_thrust / P_flap
+    # --- STROUHAL SCORE (Gaussian around biological optimum) ---
+    # St = f * tip_excursion / V. Biological flyers: St=0.2-0.4.
+    # Gaussian peaks at 0.30 with σ=0.12.
+    # This is the KEY constraint: it forces the agent to BALANCE
+    # frequency, amplitude, span, and speed. Pushing any single
+    # parameter to its limit moves St away from the optimum.
+    st = di["strouhal_number"]
+    strouhal_score = math.exp(-((st - ST_OPTIMAL) / ST_SIGMA) ** 2)
 
-    # --- Lift floor ---
-    # The ornithopter must produce enough lift to support its weight.
-    # This is the PRIMARY constraint — without adequate lift, efficiency
-    # is meaningless. The penalty is much larger than typical fitness values
-    # (which are ~0.01-0.15 N/W), forcing the agent to solve lift first.
-    if mean_lift < 0:
-        penalties["negative_lift"] = -10.0
-        fitness -= 10.0
-    elif mean_lift < TARGET_LIFT_N:
-        deficit_penalty = 5.0 * (1 - mean_lift / TARGET_LIFT_N)
-        penalties["insufficient_lift"] = -deficit_penalty
-        fitness -= deficit_penalty
+    # --- LIFT SCORE (ramp to target, then saturates) ---
+    # Must produce enough lift to support 50g.
+    if corrected_lift <= 0:
+        lift_score = 0.0
+    elif corrected_lift < TARGET_LIFT_N:
+        lift_score = corrected_lift / TARGET_LIFT_N
+    else:
+        lift_score = 1.0
 
-    # --- Lift-to-drag ratio (informational) ---
+    # --- COMPOSITE FITNESS ---
+    fitness = thrust_score * strouhal_score * lift_score
+
+    # --- Informational metrics ---
     if mean_drag > 1e-10:
         l_over_d = mean_lift / mean_drag
     elif mean_drag < -1e-10:
@@ -277,6 +298,13 @@ def compute_fitness(results):
 
     metrics = {
         "fitness": fitness,
+        "thrust_score": thrust_score,
+        "strouhal_score": strouhal_score,
+        "lift_score": lift_score,
+        "strouhal": st,
+        "corrected_thrust_N": corrected_thrust,
+        "corrected_lift_N": corrected_lift,
+        "parasitic_drag_N": parasitic_drag,
         "mean_CT": mean_CT,
         "mean_CL": mean_CL,
         "mean_CD": mean_CD,
@@ -284,12 +312,6 @@ def compute_fitness(results):
         "mean_thrust_N": mean_thrust,
         "mean_lift_N": mean_lift,
         "mean_drag_N": mean_drag,
-        "corrected_thrust_N": corrected_thrust,
-        "parasitic_drag_N": parasitic_drag,
-        "P_flap_est_W": P_flap,
     }
-
-    if penalties:
-        metrics["penalties"] = penalties
 
     return fitness, metrics

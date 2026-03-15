@@ -41,18 +41,21 @@ Each experiment simulates one ornithopter design using the Unsteady Ring Vortex 
 - Modify `evaluate.py`. It contains the ground truth fitness computation.
 - Install new packages or add dependencies.
 
-**The goal is simple: get the highest `fitness`.** The fitness metric is **propulsive efficiency** — thrust per watt of estimated flapping power. Higher fitness = more efficient design.
+**The goal is simple: get the highest `fitness`.** Fitness is a multiplicative composite of three scores, each in [0, 1]:
 
-`fitness = corrected_thrust / P_flap_estimate`
+`fitness = thrust_score × strouhal_score × lift_score`
 
-Where corrected_thrust subtracts estimated parasitic drag (UVLM is inviscid and doesn't model skin friction), and P_flap_estimate captures the cubic scaling of flapping power with tip speed.
+- **thrust_score**: saturating function of corrected thrust (N). Diminishing returns — more thrust always helps but with decreasing benefit.
+- **strouhal_score**: Gaussian peaked at St=0.30 (biological optimum). Forces you to BALANCE frequency, amplitude, span, and speed. Pushing any single parameter to its limit moves St away from the peak and tanks this score.
+- **lift_score**: ramp from 0 at zero lift to 1.0 at 0.49N (50g weight support). Must fly first.
+
+All UVLM forces are corrected by 0.5× (UVLM overestimates at low Re) and parasitic drag is subtracted. Maximum possible fitness = 1.0. A good design scores 0.1-0.4.
 
 **A good ornithopter design produces:**
-- mean_lift_N ≥ 0.49 N (enough lift to support 50g — **hard requirement**, steep penalty below this)
-- Positive corrected_thrust (net thrust after parasitic drag)
-- High fitness (thrust achieved cheaply — low flapping power cost)
-- Strouhal number in [0.2, 0.4] (biologically optimal range for propulsive efficiency)
-- Low P_flap_est_W (less power needed = smaller motor, longer flight time)
+- corrected_lift ≥ 0.49 N (lift_score = 1.0 — **required to unlock full fitness**)
+- Strouhal number near 0.30 (strouhal_score near 1.0 — **the hardest score to optimize**)
+- High corrected thrust (thrust_score — diminishing returns above ~0.15N)
+- All three scores simultaneously high (the product tanks if ANY one is low)
 
 **Simulation time** is a soft constraint. Most runs complete in 10-60 seconds. If a run exceeds 2 minutes, consider reducing NUM_SPANWISE_PANELS, NUM_CHORDWISE_PANELS, or NUM_CYCLES.
 
@@ -119,7 +122,7 @@ LOOP FOREVER:
 2. Modify `design.py` with an experimental idea
 3. git commit
 4. Run the experiment: `uv run simulate.py > run.log 2>&1`
-5. Read out the results: `grep "^fitness:\|^mean_lift_N:\|^P_flap_est_W:\|^sim_seconds:" run.log`
+5. Read out the results: `grep "^fitness:\|^thrust_score:\|^strouhal_score:\|^lift_score:\|^strouhal:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the traceback.
 7. Record the results in the TSV
 8. If fitness improved (higher), you "advance" the branch, keeping the git commit
