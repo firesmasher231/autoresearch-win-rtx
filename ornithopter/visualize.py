@@ -39,15 +39,16 @@ from design import (
 )
 
 
-def run_simulation():
+def run_simulation(skip_validation=False):
     """Build geometry, run solver, return solver object and results."""
     params = get_design_params()
-    errors = validate_design(params)
-    if errors:
-        print("DESIGN VALIDATION ERRORS:")
-        for e in errors:
-            print(f"  - {e}")
-        sys.exit(1)
+    if not skip_validation:
+        errors = validate_design(params)
+        if errors:
+            print("DESIGN VALIDATION ERRORS:")
+            for e in errors:
+                print(f"  - {e}")
+            sys.exit(1)
 
     print("Building geometry...")
     t0 = time.time()
@@ -174,7 +175,7 @@ def cmd_animate(args):
 
 def cmd_record(args):
     """Run simulation and record animation to GIF — no interaction needed."""
-    solver, _ = run_simulation()
+    solver, _ = run_simulation(skip_validation=getattr(args, 'no_validate', False))
     up = solver.unsteady_problem
 
     scalar_type = None
@@ -433,6 +434,8 @@ Examples:
     p_rec.add_argument("--dark", action="store_true", help="Black background")
     p_rec.add_argument("-o", "--output", default="ornithopter.gif",
                         help="Output filename (default: ornithopter.gif)")
+    p_rec.add_argument("--no-validate", action="store_true",
+                        help="Skip design validation (for visualizing out-of-bounds designs)")
 
     # plot
     p_plot = subparsers.add_parser("plot", help="Force/moment time-series plots")
