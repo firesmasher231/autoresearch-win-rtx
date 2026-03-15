@@ -63,6 +63,9 @@ PHYSICAL_BOUNDS = {
     "taper_ratio":     (0.30, 1.00),   # tip chord / root chord
     "sweep_angle":     (0.0,  15.0),   # quarter-chord sweep (deg)
     "dihedral_angle":  (0.0,   8.0),   # wing dihedral (deg)
+    "mid_span_fraction": (0.20, 0.80), # mid-section spanwise position
+    "mid_chord_ratio": (0.50, 2.00),   # mid chord / root chord
+    "mid_sweep_offset": (-0.02, 0.02), # fore/aft shift at mid-section (m)
     "flap_frequency":  (8.0,  18.0),   # flapping frequency (Hz)
     "flap_amplitude":  (20.0, 55.0),   # half-stroke amplitude (deg)
     "pitch_amplitude": (10.0, 30.0),   # max pitch angle (deg)
@@ -78,6 +81,9 @@ _PARAM_NAMES = {
     "taper_ratio": "TAPER_RATIO",
     "sweep_angle": "SWEEP_ANGLE",
     "dihedral_angle": "DIHEDRAL_ANGLE",
+    "mid_span_fraction": "MID_SPAN_FRACTION",
+    "mid_chord_ratio": "MID_CHORD_RATIO",
+    "mid_sweep_offset": "MID_SWEEP_OFFSET",
     "flap_frequency": "FLAP_FREQUENCY",
     "flap_amplitude": "FLAP_AMPLITUDE",
     "pitch_amplitude": "PITCH_AMPLITUDE",

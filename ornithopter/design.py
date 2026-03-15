@@ -7,19 +7,22 @@ Edit any parameter below to change the wing design, then run:
     uv run simulate.py > run.log 2>&1
 
 Parameter ranges (physically buildable bounds — see build_details.md):
-  SEMI_SPAN:        0.10 - 0.25 m   (total wingspan 200-500 mm)
-  ROOT_CHORD:       0.04 - 0.10 m
-  TAPER_RATIO:      0.30 - 1.00     (below 0.3 too fragile for film wing)
-  SWEEP_ANGLE:      0 - 15 deg      (above 15 hard with straight CF spars)
-  DIHEDRAL_ANGLE:   0 - 8 deg
-  FLAP_FREQUENCY:   8 - 18 Hz       (scaling law for 30-100g MAV)
-  FLAP_AMPLITUDE:   20 - 55 deg     (four-bar linkage limit)
-  PITCH_AMPLITUDE:  10 - 30 deg     (passive pitch from film flex)
-  PHASE_OFFSET:     75 - 105 deg
-  MEAN_AOA:         2 - 8 deg
-  FLIGHT_SPEED:     2 - 8 m/s       (MAV regime)
-  ROOT_AIRFOIL:     NACA 4-series (e.g. "naca0012", "naca2412", "naca4412")
-  TIP_AIRFOIL:      NACA 4-series
+  SEMI_SPAN:           0.10 - 0.25 m   (total wingspan 200-500 mm)
+  ROOT_CHORD:          0.04 - 0.10 m
+  TAPER_RATIO:         0.30 - 1.00     (below 0.3 too fragile for film wing)
+  SWEEP_ANGLE:         0 - 15 deg      (above 15 hard with straight CF spars)
+  DIHEDRAL_ANGLE:      0 - 8 deg
+  MID_SPAN_FRACTION:   0.20 - 0.80     (mid-section position along span)
+  MID_CHORD_RATIO:     0.50 - 2.00     (mid chord / root chord; >1 = butterfly)
+  MID_SWEEP_OFFSET:    -0.02 - 0.02 m  (fore/aft shift at mid-section)
+  FLAP_FREQUENCY:      8 - 18 Hz       (scaling law for 30-100g MAV)
+  FLAP_AMPLITUDE:      20 - 55 deg     (four-bar linkage limit)
+  PITCH_AMPLITUDE:     10 - 30 deg     (passive pitch from film flex)
+  PHASE_OFFSET:        75 - 105 deg
+  MEAN_AOA:            2 - 8 deg
+  FLIGHT_SPEED:        2 - 8 m/s       (MAV regime)
+  ROOT_AIRFOIL:        NACA 4-series (e.g. "naca0012", "naca2412", "naca4412")
+  TIP_AIRFOIL:         NACA 4-series
 """
 
 import math
@@ -35,6 +38,14 @@ SWEEP_ANGLE = 5.0            # Quarter-chord sweep, degrees
 DIHEDRAL_ANGLE = 0.0         # Upward angle from root, degrees
 ROOT_AIRFOIL = "naca2412"    # Root airfoil profile
 TIP_AIRFOIL = "naca2412"     # Tip airfoil profile
+
+# Mid-span section — controls wing planform shape
+# Set MID_CHORD_RATIO > 1.0 for butterfly-like (wider at middle)
+# Set MID_CHORD_RATIO < 1.0 for wasp-like (narrower at middle)
+# Set MID_CHORD_RATIO = linear interpolation value for standard taper
+MID_SPAN_FRACTION = 0.50     # Where along span (0=root, 1=tip)
+MID_CHORD_RATIO = 0.75       # Chord at mid / root chord (0.75 = linear taper)
+MID_SWEEP_OFFSET = 0.0       # Fore/aft shift at mid-section, meters
 
 # ---------------------------------------------------------------------------
 # Flapping Kinematics
@@ -67,8 +78,12 @@ NUM_CYCLES = 3               # *** LOCKED at 3 — do not change ***
 # ---------------------------------------------------------------------------
 
 TIP_CHORD = ROOT_CHORD * TAPER_RATIO
-MEAN_CHORD = (ROOT_CHORD + TIP_CHORD) / 2
-WING_AREA = MEAN_CHORD * SEMI_SPAN * 2  # total planform area (both wings)
+MID_CHORD = ROOT_CHORD * MID_CHORD_RATIO
+MID_Y = MID_SPAN_FRACTION * SEMI_SPAN
+# Wing area: inner trapezoid (root→mid) + outer trapezoid (mid→tip), both wings
+WING_AREA = ((ROOT_CHORD + MID_CHORD) / 2 * MID_Y +
+             (MID_CHORD + TIP_CHORD) / 2 * (SEMI_SPAN - MID_Y)) * 2
+MEAN_CHORD = WING_AREA / (2 * SEMI_SPAN)
 ASPECT_RATIO = (2 * SEMI_SPAN) ** 2 / WING_AREA
 FLAP_PERIOD = 1.0 / FLAP_FREQUENCY
 REYNOLDS_NUMBER = FLIGHT_SPEED * MEAN_CHORD / KINEMATIC_VISCOSITY

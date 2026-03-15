@@ -26,6 +26,7 @@ Each experiment simulates one ornithopter design using the Unsteady Ring Vortex 
 **What you CAN do:**
 - Modify `design.py` — this is the ONLY file you edit. You may change:
   - Wing geometry: semi-span, root chord, taper ratio, sweep, dihedral, airfoil
+  - Wing planform shape: mid-span fraction, mid-chord ratio, mid-sweep offset
   - Flapping kinematics: frequency, amplitude, pitch angle, phase offset
   - Flight conditions: speed, angle of attack
   - Panel counts: NUM_SPANWISE_PANELS (min 4), NUM_CHORDWISE_PANELS (min 3)
@@ -136,8 +137,14 @@ The design space is rich. Here are ideas organized by category:
 **Wing planform:**
 - Aspect ratio (change span and/or chord)
 - Taper ratio (rectangular vs pointed wings)
-- Sweep angle (0 to 25 degrees)
+- Sweep angle (0 to 15 degrees)
 - Different root and tip airfoils (naca0012, naca2412, naca4412, naca6412)
+- **Planform shape via mid-section** (the 3-section wing is root → mid → tip):
+  - Butterfly: MID_CHORD_RATIO = 1.5-2.0 (wide at middle, narrow at root+tip)
+  - Wasp/dragonfly: MID_CHORD_RATIO = 0.5-0.7 (narrow throughout)
+  - Elliptical: MID_CHORD_RATIO ≈ 1.1, MID_SPAN_FRACTION ≈ 0.4
+  - Scalloped: combine MID_SWEEP_OFFSET with high MID_CHORD_RATIO
+  - Delta: low TAPER_RATIO + MID_CHORD_RATIO close to linear interpolation
 
 **Flapping kinematics:**
 - Frequency (higher frequency = more thrust but more power)
@@ -180,6 +187,9 @@ The simulation must produce designs that are physically buildable as a 30–100 
 | `TAPER_RATIO`      | 0.30  | 1.00  | Below 0.3, tip is too fragile for film membrane       |
 | `SWEEP_ANGLE`      | 0°    | 15°   | Above 15° hard to build with straight CF spars        |
 | `DIHEDRAL_ANGLE`   | 0°    | 8°    | Negative is unstable; above 8° hard at root joint     |
+| `MID_SPAN_FRACTION`| 0.20  | 0.80  | Mid-section position; too near root/tip = degenerate  |
+| `MID_CHORD_RATIO`  | 0.50  | 2.00  | Mid chord / root chord; >1 = butterfly-like planform  |
+| `MID_SWEEP_OFFSET` | -0.02 m | 0.02 m | Fore/aft shift at mid-section                      |
 | `FLAP_FREQUENCY`   | 8 Hz  | 18 Hz | Scaling law f ∝ m^(−0.43) for 30–100 g class         |
 | `FLAP_AMPLITUDE`   | 20°   | 55°   | Above 55° exceeds four-bar linkage practical limit    |
 | `PITCH_AMPLITUDE`  | 10°   | 30°   | Passive pitch from film flex; above 30° causes flutter |

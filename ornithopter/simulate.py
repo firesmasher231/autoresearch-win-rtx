@@ -28,6 +28,11 @@ from design import (
     KINEMATIC_VISCOSITY,
     MEAN_AOA,
     MEAN_CHORD,
+    MID_CHORD,
+    MID_CHORD_RATIO,
+    MID_SPAN_FRACTION,
+    MID_SWEEP_OFFSET,
+    MID_Y,
     NUM_CHORDWISE_PANELS,
     NUM_CYCLES,
     NUM_SPANWISE_PANELS,
@@ -65,6 +70,9 @@ def get_design_params():
         "num_cycles": NUM_CYCLES,
         "air_density": AIR_DENSITY,
         "kinematic_viscosity": KINEMATIC_VISCOSITY,
+        "mid_span_fraction": MID_SPAN_FRACTION,
+        "mid_chord_ratio": MID_CHORD_RATIO,
+        "mid_sweep_offset": MID_SWEEP_OFFSET,
         "num_spanwise_panels": NUM_SPANWISE_PANELS,
         "num_chordwise_panels": NUM_CHORDWISE_PANELS,
     }
@@ -73,26 +81,49 @@ def get_design_params():
 def build_airplane():
     """Construct PteraSoftware Airplane geometry from design parameters.
 
+    Uses a 3-section wing (root → mid → tip) to allow non-linear planform
+    shapes (butterfly-like, elliptical, etc.). The mid-section position,
+    chord, and sweep offset are controlled by MID_SPAN_FRACTION,
+    MID_CHORD_RATIO, and MID_SWEEP_OFFSET.
+
     Uses symmetric=True with a tiny root offset from the symmetry plane to
     achieve "type 5" symmetry. This auto-creates a reflected wing AND remains
-    compatible with flapping motion (type 5 is preserved across timesteps
-    because the root never sits exactly on the symmetry plane).
+    compatible with flapping motion.
     """
     sweep_offset = SEMI_SPAN * math.tan(math.radians(SWEEP_ANGLE))
     dihedral_offset = SEMI_SPAN * math.sin(math.radians(DIHEDRAL_ANGLE))
+
+    # Mid-section position (linear interpolation of sweep/dihedral + offset)
+    mid_x = MID_SPAN_FRACTION * sweep_offset + MID_SWEEP_OFFSET
+    mid_z = MID_SPAN_FRACTION * dihedral_offset
+
+    # Split spanwise panels between inner (root→mid) and outer (mid→tip)
+    panels_inner = max(2, round(NUM_SPANWISE_PANELS * MID_SPAN_FRACTION))
+    panels_outer = max(2, NUM_SPANWISE_PANELS - panels_inner)
 
     airplane = ps.geometry.airplane.Airplane(
         wings=[
             ps.geometry.wing.Wing(
                 wing_cross_sections=[
+                    # ROOT
                     ps.geometry.wing_cross_section.WingCrossSection(
                         airfoil=ps.geometry.airfoil.Airfoil(name=ROOT_AIRFOIL),
-                        num_spanwise_panels=NUM_SPANWISE_PANELS,
+                        num_spanwise_panels=panels_inner,
                         chord=ROOT_CHORD,
                         Lp_Wcsp_Lpp=(0.0, 0.0, 0.0),
                         control_surface_symmetry_type="symmetric",
                         spanwise_spacing="cosine",
                     ),
+                    # MID
+                    ps.geometry.wing_cross_section.WingCrossSection(
+                        airfoil=ps.geometry.airfoil.Airfoil(name=ROOT_AIRFOIL),
+                        num_spanwise_panels=panels_outer,
+                        chord=MID_CHORD,
+                        Lp_Wcsp_Lpp=(mid_x, MID_Y, mid_z),
+                        control_surface_symmetry_type="symmetric",
+                        spanwise_spacing="cosine",
+                    ),
+                    # TIP
                     ps.geometry.wing_cross_section.WingCrossSection(
                         airfoil=ps.geometry.airfoil.Airfoil(name=TIP_AIRFOIL),
                         num_spanwise_panels=None,
@@ -103,8 +134,6 @@ def build_airplane():
                     ),
                 ],
                 name="Main Wing",
-                # Tiny y-offset keeps root off the symmetry plane → type 5
-                # symmetry, which stays consistent during flapping motion.
                 Ler_Gs_Cgs=(0.0, 0.001, 0.0),
                 symmetric=True,
                 symmetryNormal_G=(0.0, 1.0, 0.0),
@@ -222,6 +251,9 @@ def extract_results(solver):
             "semi_span": SEMI_SPAN,
             "root_chord": ROOT_CHORD,
             "taper_ratio": TAPER_RATIO,
+            "mid_span_fraction": MID_SPAN_FRACTION,
+            "mid_chord_ratio": MID_CHORD_RATIO,
+            "mid_sweep_offset": MID_SWEEP_OFFSET,
             "aspect_ratio": ASPECT_RATIO,
             "wing_area": WING_AREA,
             "mean_chord": MEAN_CHORD,
