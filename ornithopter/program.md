@@ -194,6 +194,51 @@ The simulation must produce designs that are physically buildable as a 30–100 
 
 These constraints are meant to keep the agent in the buildable regime. The agent should still explore the full range within these bounds — the optimal design is unknown.
 
+## Exporting results
+
+When you've converged (fitness hasn't improved in 10+ experiments, or you've exhausted the design space), export a snapshot of ALL experiment data before continuing.
+
+**Export procedure:**
+
+1. Determine the next version number by listing existing folders:
+   ```
+   ls auto-research-results/
+   ```
+   Pick the next `vN-<tag>` name (e.g., if `v2-mar15` exists, use `v3-mar15`).
+
+2. Create the export folder and copy results:
+   ```bash
+   EXPORT_DIR="auto-research-results/v3-mar15"
+   mkdir -p "$EXPORT_DIR/designs"
+
+   # Core files
+   cp results.tsv "$EXPORT_DIR/"
+   cp design.py "$EXPORT_DIR/"
+   cp sim_output.json "$EXPORT_DIR/" 2>/dev/null
+   cp run.log "$EXPORT_DIR/" 2>/dev/null
+   ```
+
+3. Export every design.py snapshot from git history (one per experiment):
+   ```bash
+   git log --oneline --all -- design.py | while read hash msg; do
+     safe_msg=$(echo "$msg" | tr ' /:' '_' | head -c 60)
+     git show "${hash}:design.py" > "$EXPORT_DIR/designs/${hash}_${safe_msg}.py" 2>/dev/null
+   done
+   ```
+
+4. If running in Docker, also sync to the mounted volume:
+   ```bash
+   cp -r "$EXPORT_DIR" /app/results/ 2>/dev/null
+   ./sync-results.sh 2>/dev/null
+   ```
+
+5. Log the export:
+   ```
+   echo "Exported to $EXPORT_DIR at $(date)"
+   ```
+
+After exporting, **keep going** — the export is a checkpoint, not a stop signal. Try new strategies, wider sweeps, or revisit discarded ideas with fresh combinations.
+
 ## NEVER STOP
 
 Once the experiment loop has begun, do NOT pause to ask the human. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep and expects you to continue working *indefinitely* until manually stopped.
