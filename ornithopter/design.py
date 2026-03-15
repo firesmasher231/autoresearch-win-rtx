@@ -28,7 +28,7 @@ import math
 # Wing Geometry
 # ---------------------------------------------------------------------------
 
-SEMI_SPAN = 0.30             # Half-wingspan, meters
+SEMI_SPAN = 0.20             # Half-wingspan, meters
 ROOT_CHORD = 0.08            # Chord at wing root, meters
 TAPER_RATIO = 0.50           # Tip chord / root chord [0.25 - 1.0]
 SWEEP_ANGLE = 5.0            # Quarter-chord sweep, degrees
@@ -40,7 +40,7 @@ TIP_AIRFOIL = "naca2412"     # Tip airfoil profile
 # Flapping Kinematics
 # ---------------------------------------------------------------------------
 
-FLAP_FREQUENCY = 5.0         # Flapping frequency, Hz
+FLAP_FREQUENCY = 12.0        # Flapping frequency, Hz
 FLAP_AMPLITUDE = 30.0        # Half-stroke amplitude, degrees
 PITCH_AMPLITUDE = 15.0       # Maximum pitch/twist angle, degrees
 PHASE_OFFSET = 90.0          # Phase lag between pitch and flap, degrees

@@ -40,13 +40,18 @@ Each experiment simulates one ornithopter design using the Unsteady Ring Vortex 
 - Modify `evaluate.py`. It contains the ground truth fitness computation.
 - Install new packages or add dependencies.
 
-**The goal is simple: get the highest `fitness`.** The fitness metric is the cycle-averaged thrust coefficient (mean_CT) with a penalty for negative lift. Higher fitness = better design.
+**The goal is simple: get the highest `fitness`.** The fitness metric is **propulsive efficiency** — thrust per watt of estimated flapping power. Higher fitness = more efficient design.
+
+`fitness = corrected_thrust / P_flap_estimate`
+
+Where corrected_thrust subtracts estimated parasitic drag (UVLM is inviscid and doesn't model skin friction), and P_flap_estimate captures the cubic scaling of flapping power with tip speed.
 
 **A good ornithopter design produces:**
-- Positive mean_CT (net thrust from flapping — this IS the fitness metric)
-- Positive mean_CL (enough lift to fly — negative CL incurs a -1.0 penalty)
-- Reasonable L/D ratio (aerodynamic efficiency)
+- mean_lift_N ≥ 0.49 N (enough lift to support 50g — **hard requirement**, steep penalty below this)
+- Positive corrected_thrust (net thrust after parasitic drag)
+- High fitness (thrust achieved cheaply — low flapping power cost)
 - Strouhal number in [0.2, 0.4] (biologically optimal range for propulsive efficiency)
+- Low P_flap_est_W (less power needed = smaller motor, longer flight time)
 
 **Simulation time** is a soft constraint. Most runs complete in 10-60 seconds. If a run exceeds 2 minutes, consider reducing NUM_SPANWISE_PANELS, NUM_CHORDWISE_PANELS, or NUM_CYCLES.
 
@@ -113,7 +118,7 @@ LOOP FOREVER:
 2. Modify `design.py` with an experimental idea
 3. git commit
 4. Run the experiment: `uv run simulate.py > run.log 2>&1`
-5. Read out the results: `grep "^fitness:\|^mean_CL:\|^sim_seconds:" run.log`
+5. Read out the results: `grep "^fitness:\|^mean_lift_N:\|^P_flap_est_W:\|^sim_seconds:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the traceback.
 7. Record the results in the TSV
 8. If fitness improved (higher), you "advance" the branch, keeping the git commit

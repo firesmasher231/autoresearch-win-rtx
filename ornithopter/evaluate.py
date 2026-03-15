@@ -7,57 +7,106 @@ Computes fitness metrics from simulation results.
 DO NOT MODIFY THIS FILE. This is the ground truth evaluation,
 analogous to prepare.py's evaluate_bpb in autoresearch.
 
-Primary metric: fitness (based on cycle-averaged thrust coefficient).
-Higher fitness = better design. The goal is to maximize fitness.
+Fitness metric: propulsive efficiency
+--------------------------------------
+fitness = corrected_thrust / P_flap_estimate
 
-Physics validity enforcement
------------------------------
-UVLM is an inviscid potential-flow solver. It has known blind spots that
-an optimizer WILL exploit if left unchecked:
+Where:
+  corrected_thrust = UVLM thrust - estimated parasitic drag (N)
+  P_flap_estimate  = (rho/6) * v_tip^3 * S_wing (watts)
 
-  1. No stall model — lift increases linearly with AoA forever (CL ≈ 2πα),
-     when real wings stall at ~12-15° and lose lift.
-  2. No collision detection — wings can pass through each other and the
-     solver happily computes forces on intersecting geometry.
-  3. Coefficient normalization — dividing by dynamic pressure (½ρv²) means
-     near-zero flight speed inflates coefficients to infinity.
+This measures how much useful thrust the design produces per watt of
+estimated flapping power. Higher = more efficient = better design.
 
-The penalties below prevent the agent from farming these artifacts.
+Why not raw CT (thrust coefficient)?
+  CT is trivially maximizable — the agent just cranks frequency, amplitude,
+  and AoA to produce huge coefficients that are physically meaningless.
+  CT = 2.81 was reached in 34 experiments by pushing every parameter to its
+  limit. The efficiency metric instead rewards designs that produce thrust
+  CHEAPLY (low flapping power), which is what actually matters for a
+  battery-powered MAV.
 
-Hard blocks (validate_design — prevent simulation from running):
-  - Wing self-intersection: |dihedral| + flap_amplitude >= 90°
-  - AoA beyond UVLM validity: |mean_aoa| > 25°
-  - Extreme dihedral: |dihedral| > 45°
-  - Flight speed too low: < 1.0 m/s
-  - Extreme aspect ratio: AR > 15
+Physical bounds enforcement
+----------------------------
+All design parameters must fall within the buildable ranges for a 30-100g
+MAV ornithopter. These are enforced as hard blocks in validate_design.
+See build_details.md for the physical justification of each bound.
 
-Soft penalties (compute_fitness — simulation runs but fitness is crushed):
-  - Coefficient cap: mean_CT capped at 2.0
-  - Stall regime: quadratic penalty for |AoA| > 15°
-  - Negative lift: -1.0 (can't fly without lift)
+Lift floor
+-----------
+The design must produce at least 0.49N of mean lift (supporting 50g against
+gravity). Designs below this threshold receive a steep penalty that dominates
+the efficiency score, forcing the agent to meet the lift requirement before
+optimizing efficiency.
 """
 
 import math
 
 
-# Maximum physically plausible thrust coefficient.
-# Real flapping wings produce CT in 0–1.0. Values above 2.0 indicate the
-# simulation is in an unphysical regime. This cap prevents the agent from
-# being rewarded for exploiting UVLM artifacts.
-MAX_PLAUSIBLE_CT = 2.0
+# Air density at sea level, 20°C (locked physical constant)
+RHO = 1.225
+
+# Minimum lift to support target weight: 50g * 9.81 m/s²
+TARGET_LIFT_N = 0.49
+
+# Estimated parasitic drag coefficient (profile drag + body drag).
+# UVLM is inviscid and does not compute viscous drag. This correction
+# prevents the agent from being rewarded for "free thrust" that would
+# be eaten by skin friction in reality.
+CD_PARASITE = 0.03
+
+# Physical bounds for a buildable 30-100g MAV ornithopter.
+# Enforced as hard blocks — simulation won't run outside these ranges.
+PHYSICAL_BOUNDS = {
+    "semi_span":       (0.10, 0.25),   # total wingspan 200-500mm
+    "root_chord":      (0.04, 0.10),   # wing chord at root (m)
+    "taper_ratio":     (0.30, 1.00),   # tip chord / root chord
+    "sweep_angle":     (0.0,  15.0),   # quarter-chord sweep (deg)
+    "dihedral_angle":  (0.0,   8.0),   # wing dihedral (deg)
+    "flap_frequency":  (8.0,  18.0),   # flapping frequency (Hz)
+    "flap_amplitude":  (20.0, 55.0),   # half-stroke amplitude (deg)
+    "pitch_amplitude": (10.0, 30.0),   # max pitch angle (deg)
+    "phase_offset":    (75.0, 105.0),  # pitch-flap phase lag (deg)
+    "mean_aoa":        (2.0,   8.0),   # body angle of attack (deg)
+    "flight_speed":    (2.0,   8.0),   # forward airspeed (m/s)
+}
+
+# Human-readable names for error messages
+_PARAM_NAMES = {
+    "semi_span": "SEMI_SPAN",
+    "root_chord": "ROOT_CHORD",
+    "taper_ratio": "TAPER_RATIO",
+    "sweep_angle": "SWEEP_ANGLE",
+    "dihedral_angle": "DIHEDRAL_ANGLE",
+    "flap_frequency": "FLAP_FREQUENCY",
+    "flap_amplitude": "FLAP_AMPLITUDE",
+    "pitch_amplitude": "PITCH_AMPLITUDE",
+    "phase_offset": "PHASE_OFFSET",
+    "mean_aoa": "MEAN_AOA",
+    "flight_speed": "FLIGHT_SPEED",
+}
 
 
 def validate_design(params):
     """Check design parameters for physical plausibility.
 
     Returns a list of error strings. Empty list = valid design.
-    Hard errors prevent the simulation from running — these catch
-    configurations where UVLM would produce meaningless results.
+    Hard errors prevent the simulation from running.
     """
     errors = []
 
-    # --- Basic parameter validity ---
+    # --- Physical bounds (buildable MAV range) ---
+    for param, (lo, hi) in PHYSICAL_BOUNDS.items():
+        if param in params:
+            val = params[param]
+            if val < lo or val > hi:
+                name = _PARAM_NAMES.get(param, param.upper())
+                errors.append(
+                    f"{name} = {val} is outside buildable range [{lo}, {hi}]. "
+                    f"See build_details.md."
+                )
 
+    # --- Basic parameter validity ---
     if params["semi_span"] <= 0:
         errors.append("SEMI_SPAN must be positive")
     if params["root_chord"] <= 0:
@@ -66,72 +115,24 @@ def validate_design(params):
         errors.append("TAPER_RATIO must be in (0, 1.0]")
     if params["flap_frequency"] <= 0:
         errors.append("FLAP_FREQUENCY must be positive")
-    if not (0 < params["flap_amplitude"] <= 89):
-        errors.append("FLAP_AMPLITUDE must be in (0, 89] degrees")
-    if params["pitch_amplitude"] < 0 or params["pitch_amplitude"] > 89:
-        errors.append("PITCH_AMPLITUDE must be in [0, 89] degrees")
     if params["flight_speed"] <= 0:
         errors.append("FLIGHT_SPEED must be positive")
     if params["num_cycles"] < 1:
         errors.append("NUM_CYCLES must be >= 1")
 
-    # --- Wing self-intersection (HARD BLOCK) ---
-    # Symmetric wings flap about the body axis. When |dihedral| + flap_amplitude
-    # >= 90°, the wingtip crosses the symmetry plane during the stroke, meaning
-    # left and right wings pass through each other. UVLM has NO collision
-    # detection — it computes forces on intersecting geometry, producing
-    # completely meaningless results.
-    # The agent previously exploited this (dihedral=40° + amplitude=70° = 110°)
-    # to reach fitness ~331 with wings clipping through themselves.
+    # --- Wing self-intersection (safety net) ---
+    # With physical bounds (dihedral <= 8, amplitude <= 55), max total is
+    # 63° — well below 90°. But keep this check as defense in depth.
     dihedral = params.get("dihedral_angle", 0)
     flap_amp = params.get("flap_amplitude", 0)
-    total_excursion = abs(dihedral) + flap_amp
-    if total_excursion >= 90:
+    if abs(dihedral) + flap_amp >= 90:
         errors.append(
             f"WING SELF-INTERSECTION: |dihedral| ({abs(dihedral):.1f}°) + "
-            f"flap_amplitude ({flap_amp:.1f}°) = {total_excursion:.1f}° >= 90°. "
-            f"Wings would clip through each other. Reduce dihedral or amplitude."
+            f"flap_amplitude ({flap_amp:.1f}°) >= 90°. "
+            f"Wings would clip through each other."
         )
 
-    # --- AoA beyond UVLM validity (HARD BLOCK) ---
-    # UVLM is inviscid potential flow. It CANNOT model stall (flow separation).
-    # Real wings stall at 12-15° AoA. UVLM predicts lift increasing linearly
-    # forever, producing arbitrarily large fantasy coefficients.
-    # The agent previously exploited this (AoA = -80°) to get CT = 331.
-    # Hard block at 25° (generous margin); soft penalty starts at 15°.
-    mean_aoa = params.get("mean_aoa", 0)
-    if abs(mean_aoa) > 25:
-        errors.append(
-            f"|MEAN_AOA| = {abs(mean_aoa):.1f}° exceeds 25°. UVLM cannot model "
-            f"stall — results above ~15° are increasingly unreliable, and "
-            f"above 25° are pure fiction. Use |MEAN_AOA| <= 25°."
-        )
-
-    # --- Extreme dihedral (HARD BLOCK) ---
-    # Dihedral > 45° is structurally impossible for a real wing and produces
-    # bizarre force decompositions in the simulation.
-    if abs(dihedral) > 45:
-        errors.append(
-            f"|DIHEDRAL_ANGLE| = {abs(dihedral):.1f}° exceeds 45°. "
-            f"Real ornithopters use 0-10° dihedral. Max allowed: 45°."
-        )
-
-    # --- Flight speed floor (HARD BLOCK) ---
-    # Force coefficients are normalized by dynamic pressure q = ½ρv².
-    # Near-zero v makes q ≈ 0, inflating coefficients to infinity even
-    # with negligible actual forces. Below 1 m/s the coefficients are
-    # numerically meaningless.
-    if 0 < params["flight_speed"] < 1.0:
-        errors.append(
-            f"FLIGHT_SPEED = {params['flight_speed']:.2f} m/s is too low. "
-            f"Below 1 m/s, force coefficients are normalized by near-zero "
-            f"dynamic pressure, producing inflated values. Minimum: 1.0 m/s."
-        )
-
-    # --- Extreme aspect ratio (HARD BLOCK) ---
-    # Very high AR with thin chord is structurally impossible for a flapping
-    # wing and gives unreliable UVLM results at low Reynolds numbers where
-    # viscous effects dominate.
+    # --- Extreme aspect ratio ---
     if params["semi_span"] > 0 and params["root_chord"] > 0:
         mean_chord = params["root_chord"] * (1 + params["taper_ratio"]) / 2
         wing_area = mean_chord * params["semi_span"] * 2
@@ -139,46 +140,34 @@ def validate_design(params):
         if ar > 15:
             errors.append(
                 f"Aspect ratio {ar:.1f} exceeds 15. Structurally infeasible "
-                f"for a flapping wing — the spar would snap. Real flapping-wing "
-                f"MAVs use AR 3-10."
+                f"for a flapping wing."
             )
 
     # --- Locked physical constants ---
-    # These are properties of the environment, not the design. Changing them
-    # is not "optimizing the ornithopter" — it's changing the laws of physics.
     if "air_density" in params and params["air_density"] != 1.225:
         errors.append(
-            f"AIR_DENSITY = {params['air_density']} but must be 1.225 kg/m³ "
-            f"(sea level standard). This is a physical constant, not a design parameter."
+            f"AIR_DENSITY = {params['air_density']} but must be 1.225 kg/m³. "
+            f"This is a physical constant, not a design parameter."
         )
     if "kinematic_viscosity" in params and params["kinematic_viscosity"] != 15.06e-6:
         errors.append(
             f"KINEMATIC_VISCOSITY = {params['kinematic_viscosity']} but must be "
-            f"15.06e-6 m²/s (air at ~20°C). This is a physical constant, not a design parameter."
+            f"15.06e-6 m²/s. This is a physical constant, not a design parameter."
         )
 
     # --- Locked simulation parameters ---
-    # NUM_CYCLES: fewer cycles = unreliable cycle-averaging (the last cycle
-    # is used for mean forces — it needs preceding cycles to reach periodicity).
-    # More than 3 wastes time. Lock at 3.
     if "num_cycles" in params and params["num_cycles"] != 3:
         errors.append(
             f"NUM_CYCLES = {params['num_cycles']} but must be 3. "
             f"Cycle count affects result quality and must stay fixed."
         )
-
-    # Panel count floors: fewer panels = faster but noisier results.
-    # The agent could reduce panels to game speed at the cost of accuracy.
-    # Minimum 4 spanwise, 3 chordwise for any meaningful UVLM result.
     if "num_spanwise_panels" in params and params["num_spanwise_panels"] < 4:
         errors.append(
-            f"NUM_SPANWISE_PANELS = {params['num_spanwise_panels']} is below minimum (4). "
-            f"Too few panels for reliable UVLM results."
+            f"NUM_SPANWISE_PANELS = {params['num_spanwise_panels']} is below minimum (4)."
         )
     if "num_chordwise_panels" in params and params["num_chordwise_panels"] < 3:
         errors.append(
-            f"NUM_CHORDWISE_PANELS = {params['num_chordwise_panels']} is below minimum (3). "
-            f"Too few panels for reliable UVLM results."
+            f"NUM_CHORDWISE_PANELS = {params['num_chordwise_panels']} is below minimum (3)."
         )
 
     # --- Strouhal number sanity ---
@@ -189,26 +178,32 @@ def validate_design(params):
         st = params["flap_frequency"] * tip_excursion / params["flight_speed"]
         if st > 1.0:
             errors.append(
-                f"Strouhal number {st:.2f} is very high (>1.0), design may be unphysical"
+                f"Strouhal number {st:.2f} exceeds 1.0 — design is unphysical."
             )
 
     return errors
 
 
 def compute_fitness(results):
-    """Compute the primary fitness metric from simulation results.
+    """Compute fitness as propulsive efficiency: thrust per watt of flapping power.
 
-    Base metric: cycle-averaged thrust coefficient (mean_CT).
+    fitness = corrected_thrust / P_flap_estimate
 
-    Physics penalties (applied in order):
-      1. Coefficient cap: CT capped at MAX_PLAUSIBLE_CT (2.0)
-      2. Stall regime: quadratic penalty for |AoA| > 15°
-      3. Negative lift: -1.0 (ornithopter must support its weight)
+    Where:
+      corrected_thrust = UVLM mean thrust - parasitic drag estimate (N)
+      P_flap_estimate  = (rho/6) * v_tip^3 * wing_area (watts)
+        v_tip = 2*pi*f * semi_span * sin(flap_amplitude)
 
-    These penalties exist because UVLM is inviscid and produces
-    arbitrarily large coefficients in unphysical regimes. Without them,
-    the optimizer will find and exploit these simulation artifacts
-    instead of finding genuinely good designs.
+    The parasitic drag correction accounts for viscous drag that UVLM
+    (inviscid solver) does not model. Without it, the agent gets "free"
+    thrust at high speeds.
+
+    P_flap_estimate captures the cubic scaling of flapping power with tip
+    speed — the dominant cost of flapping flight. Higher frequency, larger
+    amplitude, or longer span all increase tip speed and thus power cubically.
+
+    Lift floor: mean_lift must reach 0.49N (50g weight support). Designs
+    below this get a steep penalty that dominates the efficiency score.
 
     Returns:
         (fitness, metrics_dict)
@@ -223,39 +218,53 @@ def compute_fitness(results):
     mean_lift = ca["mean_lift"]
     mean_drag = ca["mean_drag"]
 
+    V = di["flight_speed"]
+    S = di["wing_area"]
+    f = di["flap_frequency"]
+    b = di["semi_span"]
+    amp_rad = math.radians(di["flap_amplitude"])
+
     penalties = {}
 
-    # --- Coefficient cap ---
-    # Real flapping wings produce CT in 0-1.0 range. Values above
-    # MAX_PLAUSIBLE_CT indicate an unphysical simulation regime.
-    if mean_CT > MAX_PLAUSIBLE_CT:
-        penalties["coefficient_cap"] = MAX_PLAUSIBLE_CT - mean_CT
-        fitness = MAX_PLAUSIBLE_CT
-    else:
-        fitness = mean_CT
+    # --- Parasitic drag correction ---
+    # UVLM is inviscid: it computes pressure forces but not skin friction.
+    # A real wing has profile drag + body drag ≈ Cd_parasite * q * S.
+    # Subtract this from UVLM thrust to get realistic net thrust.
+    q = 0.5 * RHO * V ** 2
+    parasitic_drag = q * S * CD_PARASITE
+    corrected_thrust = mean_thrust - parasitic_drag
 
-    # --- Stall regime penalty ---
-    # UVLM results degrade past ~12° AoA and are meaningless by ~25°.
-    # Quadratic penalty starting at 15° makes stall-exploiting designs
-    # uncompetitive without punishing legitimate high-AoA exploration.
-    #   16° → -0.1,  18° → -0.9,  20° → -2.5,  25° → -10.0
-    aoa = abs(di["mean_aoa"])
-    if aoa > 15:
-        stall_penalty = -((aoa - 15) ** 2) * 0.1
-        fitness += stall_penalty
-        penalties["stall_regime"] = stall_penalty
+    # --- Estimated flapping power (watts) ---
+    # Tip speed of the wing during flapping:
+    #   v_tip = 2*pi*f * semi_span * sin(flap_amplitude)
+    # Power scales as v_tip^3 (aerodynamic drag on oscillating wing),
+    # with span-averaging factor of 1/3 (velocity varies from 0 at root
+    # to v_tip at tip, and power ~ v^3, so integral of (r/b)^3 = 1/4,
+    # combined with 1/2 from dynamic pressure gives 1/6 overall).
+    v_tip = 2 * math.pi * f * b * math.sin(amp_rad)
+    P_flap = (RHO / 6) * v_tip ** 3 * S
+    P_flap = max(P_flap, 0.01)  # floor to prevent division by zero
 
-    # --- Negative lift penalty ---
-    # An ornithopter must produce positive mean lift to support its weight.
-    if mean_CL < 0:
-        fitness -= 1.0
-        penalties["negative_lift"] = -1.0
+    # --- Base fitness: propulsive efficiency (N/W) ---
+    fitness = corrected_thrust / P_flap
 
-    # --- Lift-to-drag ratio ---
+    # --- Lift floor ---
+    # The ornithopter must produce enough lift to support its weight.
+    # This is the PRIMARY constraint — without adequate lift, efficiency
+    # is meaningless. The penalty is much larger than typical fitness values
+    # (which are ~0.01-0.15 N/W), forcing the agent to solve lift first.
+    if mean_lift < 0:
+        penalties["negative_lift"] = -10.0
+        fitness -= 10.0
+    elif mean_lift < TARGET_LIFT_N:
+        deficit_penalty = 5.0 * (1 - mean_lift / TARGET_LIFT_N)
+        penalties["insufficient_lift"] = -deficit_penalty
+        fitness -= deficit_penalty
+
+    # --- Lift-to-drag ratio (informational) ---
     if mean_drag > 1e-10:
         l_over_d = mean_lift / mean_drag
     elif mean_drag < -1e-10:
-        # Net thrust: report lift/|thrust| as a reference
         l_over_d = mean_lift / abs(mean_drag)
     else:
         l_over_d = float("inf") if mean_lift > 0 else 0.0
@@ -269,6 +278,9 @@ def compute_fitness(results):
         "mean_thrust_N": mean_thrust,
         "mean_lift_N": mean_lift,
         "mean_drag_N": mean_drag,
+        "corrected_thrust_N": corrected_thrust,
+        "parasitic_drag_N": parasitic_drag,
+        "P_flap_est_W": P_flap,
     }
 
     if penalties:
